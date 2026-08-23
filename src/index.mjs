@@ -1,8 +1,9 @@
-import { claimJob, completeJob, failJob } from './backend-client.mjs'
+import { claimJob, completeJob, failJob, getAgentConfig } from './backend-client.mjs'
 import { config } from './config.mjs'
 import { printText } from './transports/windows-spooler.mjs'
 
 let stopping = false
+let printers = new Map()
 
 function log(message, error) {
   const suffix = error ? ` ${error instanceof Error ? error.message : String(error)}` : ''
@@ -15,7 +16,13 @@ async function processNextJob() {
 
   log(`Printing job ${job._id || job.id}`)
   try {
-    await printText(job.payload?.printableText || '')
+    let printer = printers.get(String(job.printerId))
+    if (!printer) {
+      await refreshPrinters()
+      printer = printers.get(String(job.printerId))
+    }
+    if (!printer) throw new Error(`Printer configuration not found for ${job.printerId}`)
+    await printText(job.payload?.printableText || '', printer)
     await completeJob(job._id || job.id)
     log(`Printed job ${job._id || job.id}`)
   } catch (error) {
@@ -25,15 +32,21 @@ async function processNextJob() {
   return true
 }
 
+async function refreshPrinters() {
+  const agentConfig = await getAgentConfig()
+  printers = new Map((agentConfig?.printers || []).map((printer) => [String(printer._id), printer]))
+}
+
 async function run() {
+  await refreshPrinters()
   log(`MamMi Print Agent started for ${config.agentId}`)
   while (!stopping) {
     try {
       const processed = await processNextJob()
-      if (!processed) await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs))
+      if (!processed) await new Promise((resolve) => setTimeout(resolve, 250))
     } catch (error) {
       log('Backend connection failed; retrying', error)
-      await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
   }
 }

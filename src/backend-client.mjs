@@ -11,7 +11,6 @@ async function request(path, options = {}) {
         'content-type': 'application/json',
         'x-agent-id': config.agentId,
         'x-agent-token': config.agentToken,
-        'x-store-id': config.storeId,
         ...(options.headers || {}),
       },
     })
@@ -24,9 +23,10 @@ async function request(path, options = {}) {
 }
 
 export async function claimJob() {
-  const response = await request('/api/print-agent/jobs/claim', { method: 'POST', body: '{}' })
+  const response = await request(`/api/print-agent/jobs/claim?wait=${encodeURIComponent(config.longPollWaitMs)}`, { method: 'POST', body: '{}' })
   return response.data || null
 }
+export async function getAgentConfig() { return (await request('/api/print-agent/config')).data }
 
 export function completeJob(jobId) {
   return request(`/api/print-agent/jobs/${encodeURIComponent(jobId)}/complete`, { method: 'POST', body: '{}' })
