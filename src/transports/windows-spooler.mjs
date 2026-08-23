@@ -19,33 +19,63 @@ $labelHeightPx = [int][Math]::Ceiling([double]$env:MAMMI_LABEL_HEIGHT_MM * 203 /
 function New-LabelBitmap([string]$block) {
   $lines = $block -split "\`n"
   $renderLines = @()
+  $measureBitmap = [System.Drawing.Bitmap]::new(1, 1)
+  $measureGraphics = [System.Drawing.Graphics]::FromImage($measureBitmap)
+  # Keep a visible right margin on the physical label.
+  $maxTextWidth = $labelWidthPx - 60
   for ($index = 0; $index -lt $lines.Count; $index++) {
     $raw = $lines[$index].TrimEnd("\`r")
-    $isOptionLine = $raw.StartsWith('- ') -or $raw.StartsWith('+ ')
-    $fontSize = if ($index -eq 1) { 18 } elseif ($index -eq 0) { 13 } else { 11 }
-    $maxChars = if ($index -eq 1) { 23 } elseif ($isOptionLine) { 44 } elseif ($index -eq 0) { 38 } else { 46 }
-    while ($raw.Length -gt $maxChars) {
-      $cut = $raw.LastIndexOf(' ', [Math]::Min($maxChars, $raw.Length - 1))
-      if ($cut -lt 1) { $cut = $maxChars }
+    $isOptionLine = $raw.StartsWith('- ') -or $raw.StartsWith('+ ') -or $raw.StartsWith('不加:') -or $raw.StartsWith('加點:')
+    $fontSize = if ($index -eq 1) { 18 } elseif ($index -eq 0) { 13 } elseif ($isOptionLine) { 13 } else { 11 }
+    $originalWasEmpty = $raw.Length -eq 0
+    $measureFont = [System.Drawing.Font]::new('Arial', [single]$fontSize, [System.Drawing.FontStyle]::Bold)
+    while ($raw.Length -gt 0) {
+      $cut = $raw.Length
+      while ($cut -gt 1 -and $measureGraphics.MeasureString($raw.Substring(0, $cut), $measureFont).Width -gt $maxTextWidth) { $cut-- }
+      if ($cut -eq $raw.Length) {
+        $renderLines += [PSCustomObject]@{ Text = $raw.Trim(); Size = $fontSize }
+        $raw = ''
+        break
+      }
+      $spaceCut = $raw.LastIndexOf(' ', $cut - 1)
+      if ($spaceCut -gt 0) { $cut = $spaceCut }
       $renderLines += [PSCustomObject]@{ Text = $raw.Substring(0, $cut).Trim(); Size = $fontSize }
       $raw = $raw.Substring($cut).Trim()
     }
-    if ($raw.Length -gt 0) { $renderLines += [PSCustomObject]@{ Text = $raw; Size = $fontSize } }
+    $measureFont.Dispose()
+    if ($originalWasEmpty) {
+      # Preserve intentional blank lines from backend print jobs as vertical spacing.
+      $renderLines += [PSCustomObject]@{ Text = ''; Size = $fontSize }
+    }
   }
-  $dynamicHeight = [Math]::Max(100, ($lineHeight * $renderLines.Count) + 16)
+  $measureGraphics.Dispose()
+  $measureBitmap.Dispose()
+  $extraSpacing = ($renderLines | Where-Object { $_.Text.Trim().StartsWith('不加:') }).Count * 6
+  $dynamicHeight = [Math]::Max(100, ($lineHeight * $renderLines.Count) + 16 + $extraSpacing)
   $height = if ($env:MAMMI_PRINT_MODE -eq 'label') { $labelHeightPx } else { $dynamicHeight }
+  $footerLine = $renderLines | Where-Object { $_.Text.Trim() -match '^\d+\/\d+$' } | Select-Object -Last 1
   $bitmap = [System.Drawing.Bitmap]::new($labelWidthPx, [int]$height)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphics.Clear([System.Drawing.Color]::White)
   $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+  $graphics.SetClip([System.Drawing.Rectangle]::new(7, 0, $labelWidthPx - 60, [int]$height))
   $y = 6
   for ($lineIndex = 0; $lineIndex -lt $renderLines.Count; $lineIndex++) {
     $line = $renderLines[$lineIndex]
     $style = if ($line.Size -ge 11) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
     $font = [System.Drawing.Font]::new('Arial', [single]$line.Size, $style)
-    $graphics.DrawString($line.Text, $font, [System.Drawing.Brushes]::Black, 4, $y)
+    $isFooter = $line.Text.Trim() -match '^\d+\/\d+$'
+    $isNoteLine = $line.Text.Trim().StartsWith('不加:')
+    if ($isFooter) { $font.Dispose(); continue }
+    $drawY = if ($isNoteLine) { $y + 6 } else { $y }
+    $graphics.DrawString($line.Text, $font, [System.Drawing.Brushes]::Black, 7, $drawY)
     $font.Dispose()
-    $y += $lineHeight
+    $y = $drawY + $lineHeight
+  }
+  if ($null -ne $footerLine) {
+    $footerFont = [System.Drawing.Font]::new('Arial', [single]11, [System.Drawing.FontStyle]::Bold)
+    $graphics.DrawString($footerLine.Text.Trim(), $footerFont, [System.Drawing.Brushes]::Black, 7, $height - $lineHeight - 6)
+    $footerFont.Dispose()
   }
   $graphics.Dispose()
   return $bitmap
