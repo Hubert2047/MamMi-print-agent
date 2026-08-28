@@ -1,0 +1,7 @@
+{
+  "main": "dist/index.cjs",
+  "output": "dist/mammi-print-agent.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": false
+}

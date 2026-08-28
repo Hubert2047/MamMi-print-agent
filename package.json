@@ -4,9 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-windows.ps1"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "postject": "^1.0.0-alpha.6"
   }
 }
