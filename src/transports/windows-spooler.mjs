@@ -10,8 +10,9 @@ export async function printText(text, printer) {
   // Kitchen label printers understand TSPL directly. Avoid the bitmap renderer
   // (which starts PowerShell/System.Drawing and scans every pixel) because that
   // adds several seconds for multi-item Chinese orders.
-  if ((printer.profile || printer.printerProfile) === 'kitchen-label-tspl' && canUseDirectTspl(text)) {
-    await printDirectTspl(text, printer)
+  const tsplText = normalizeTsplText(text)
+  if ((printer.profile || printer.printerProfile) === 'kitchen-label-tspl' && canUseDirectTspl(tsplText)) {
+    await printDirectTspl(tsplText, printer)
     return
   }
 
@@ -21,6 +22,13 @@ export async function printText(text, printer) {
 
 function canUseDirectTspl(text) {
   return /^[\x09\x0A\x0D\x0C\x20-\x7E\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]*$/.test(text)
+}
+
+function normalizeTsplText(text) {
+  return text
+    .replace(/[đĐ]/g, (character) => character === 'đ' ? 'd' : 'D')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
 }
 
 function escapeTsplText(value) {
