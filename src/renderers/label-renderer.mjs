@@ -12,8 +12,7 @@ export async function renderLabel(text, printer = config) {
   await fs.writeFile(filePath, `${text.trim()}\r\n\r\n`, 'utf8')
   const script = `
 Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName System.Drawing.Printing
-$lineHeight = 27
+$lineHeight = 23
 $labelWidthPx = [int][Math]::Ceiling([double]$env:MAMMI_LABEL_WIDTH_MM * [double]$env:MAMMI_PRINTER_DPI / 25.4)
 $labelHeightPx = [int][Math]::Ceiling([double]$env:MAMMI_LABEL_HEIGHT_MM * [double]$env:MAMMI_PRINTER_DPI / 25.4)
 function New-LabelBitmap([string]$block) {
@@ -21,11 +20,11 @@ function New-LabelBitmap([string]$block) {
   $renderLines = @()
   $measureBitmap = [System.Drawing.Bitmap]::new(1, 1)
   $measureGraphics = [System.Drawing.Graphics]::FromImage($measureBitmap)
-  $maxTextWidth = $labelWidthPx - 60
+  $maxTextWidth = $labelWidthPx - 20
   for ($index = 0; $index -lt $lines.Count; $index++) {
     $raw = $lines[$index].TrimEnd("\`r")
     $isOptionLine = $raw.StartsWith('- ') -or $raw.StartsWith('+ ') -or $raw.StartsWith('不加:') -or $raw.StartsWith('加點:')
-    $fontSize = if ($index -eq 1) { 18 } elseif ($index -eq 0) { 13 } elseif ($isOptionLine) { 13 } else { 11 }
+    $fontSize = if ($index -eq 1) { 16 } elseif ($index -eq 0) { 12 } elseif ($isOptionLine) { 12 } else { 10 }
     $originalWasEmpty = $raw.Length -eq 0
     $measureFont = [System.Drawing.Font]::new('Arial', [single]$fontSize, [System.Drawing.FontStyle]::Bold)
     while ($raw.Length -gt 0) {
@@ -49,28 +48,31 @@ function New-LabelBitmap([string]$block) {
   $extraSpacing = ($renderLines | Where-Object { $_.Text.Trim().StartsWith('不加:') }).Count * 6
   $dynamicHeight = [Math]::Max(100, ($lineHeight * $renderLines.Count) + 16 + $extraSpacing)
   $height = if ($env:MAMMI_PRINT_PROFILE -eq 'kitchen-label-tspl') { $labelHeightPx } else { $dynamicHeight }
-  $footerLine = $renderLines | Where-Object { $_.Text.Trim() -match '^\d+\/\d+$' } | Select-Object -Last 1
+  $footerLine = $renderLines | Where-Object { $_.Text.Trim() -match '^[0-9]+/[0-9]+$' } | Select-Object -Last 1
   $bitmap = [System.Drawing.Bitmap]::new($labelWidthPx, [int]$height)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphics.Clear([System.Drawing.Color]::White)
   $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-  $graphics.SetClip([System.Drawing.Rectangle]::new(7, 0, $labelWidthPx - 60, [int]$height))
+  $graphics.SetClip([System.Drawing.Rectangle]::new(7, 0, $labelWidthPx - 20, [int]$height))
   $y = 6
+  $footerY = [int]$height - 36
   for ($lineIndex = 0; $lineIndex -lt $renderLines.Count; $lineIndex++) {
     $line = $renderLines[$lineIndex]
     $style = if ($line.Size -ge 11) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
     $font = [System.Drawing.Font]::new('Arial', [single]$line.Size, $style)
-    $isFooter = $line.Text.Trim() -match '^\d+\/\d+$'
+    $isFooter = $line.Text.Trim() -match '^[0-9]+/[0-9]+$'
     $isNoteLine = $line.Text.Trim().StartsWith('不加:')
     if ($isFooter) { $font.Dispose(); continue }
     $drawY = if ($isNoteLine) { $y + 6 } else { $y }
+    if ($null -ne $footerLine -and $drawY -ge $footerY) { $font.Dispose(); break }
     $graphics.DrawString($line.Text, $font, [System.Drawing.Brushes]::Black, 7, $drawY)
     $font.Dispose()
     $y = $drawY + $lineHeight
   }
   if ($null -ne $footerLine) {
-    $footerFont = [System.Drawing.Font]::new('Arial', [single]11, [System.Drawing.FontStyle]::Bold)
-    $graphics.DrawString($footerLine.Text.Trim(), $footerFont, [System.Drawing.Brushes]::Black, 7, $height - $lineHeight - 6)
+    $graphics.FillRectangle([System.Drawing.Brushes]::White, 0, [Math]::Max(0, $footerY - 3), $labelWidthPx, [int]$height - [Math]::Max(0, $footerY - 3))
+    $footerFont = [System.Drawing.Font]::new('Arial', [single]18, [System.Drawing.FontStyle]::Bold)
+    $graphics.DrawString($footerLine.Text.Trim(), $footerFont, [System.Drawing.Brushes]::Black, 7, $footerY)
     $footerFont.Dispose()
   }
   $graphics.Dispose()
@@ -85,15 +87,26 @@ Add-Ascii ("SIZE {0} mm,{1} mm\`r\`nGAP {2} mm,0\`r\`nDIRECTION 1\`r\`nCLS\`r\`n
 foreach ($bitmap in $bitmaps) {
   $widthBytes = [int][Math]::Ceiling([double]$bitmap.Width / 8)
   $pixels = [byte[]]::new($widthBytes * $bitmap.Height)
-  for ($y = 0; $y -lt $bitmap.Height; $y++) {
-    for ($x = 0; $x -lt $bitmap.Width; $x++) {
-      $pixel = $bitmap.GetPixel($x, $y)
-      if ($pixel.R -ge 200) {
-        $byteIndex = $y * $widthBytes + [int][Math]::Floor([double]$x / 8)
-        $bit = 7 - ($x % 8)
-        $pixels[$byteIndex] = $pixels[$byteIndex] -bor (1 -shl $bit)
+  $rectangle = [System.Drawing.Rectangle]::new(0, 0, $bitmap.Width, $bitmap.Height)
+  $bitmapData = $bitmap.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  try {
+    $sourceStride = [Math]::Abs($bitmapData.Stride)
+    $sourceBytes = [byte[]]::new($sourceStride * $bitmap.Height)
+    [System.Runtime.InteropServices.Marshal]::Copy($bitmapData.Scan0, $sourceBytes, 0, $sourceBytes.Length)
+    for ($y = 0; $y -lt $bitmap.Height; $y++) {
+      $sourceRow = $y * $sourceStride
+      $outputRow = $y * $widthBytes
+      for ($x = 0; $x -lt $bitmap.Width; $x++) {
+        $red = $sourceBytes[$sourceRow + ($x * 4) + 2]
+        if ($red -ge 200) {
+          $byteIndex = $outputRow + [int][Math]::Floor([double]$x / 8)
+          $bit = 7 - ($x % 8)
+          $pixels[$byteIndex] = $pixels[$byteIndex] -bor (1 -shl $bit)
+        }
       }
     }
+  } finally {
+    $bitmap.UnlockBits($bitmapData)
   }
   Add-Ascii ("BITMAP 0,0,{0},{1},0," -f $widthBytes, $bitmap.Height)
   $raw.AddRange($pixels)

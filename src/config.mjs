@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = process.isSea
+const runningAsWindowsExecutable = path.basename(process.execPath).toLowerCase() === 'mammi-print-agent.exe'
+const root = process.isSea || runningAsWindowsExecutable
   ? path.dirname(process.execPath)
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const envPath = path.join(root, '.env')
