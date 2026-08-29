@@ -72,7 +72,10 @@ function New-LabelBitmap([string]$block) {
   if ($null -ne $footerLine) {
     $graphics.FillRectangle([System.Drawing.Brushes]::White, 0, [Math]::Max(0, $footerY - 3), $labelWidthPx, [int]$height - [Math]::Max(0, $footerY - 3))
     $footerFont = [System.Drawing.Font]::new('Arial', [single]18, [System.Drawing.FontStyle]::Bold)
-    $graphics.DrawString($footerLine.Text.Trim(), $footerFont, [System.Drawing.Brushes]::Black, 7, $footerY)
+    $footerText = $footerLine.Text.Trim()
+    $footerWidth = $graphics.MeasureString($footerText, $footerFont).Width
+    $footerX = [Math]::Max(7, $labelWidthPx - 7 - [int]$footerWidth)
+    $graphics.DrawString($footerText, $footerFont, [System.Drawing.Brushes]::Black, $footerX, $footerY)
     $footerFont.Dispose()
   }
   $graphics.Dispose()

@@ -82,7 +82,9 @@ async function printDirectTspl(text, printer) {
     })
     if (footerLine) {
       const footerY = Math.max(8, Math.round(Number(printer.labelHeightMm) * Number(printer.printerDpi) / 25.4) - (hasChinese ? 26 : 22))
-      commands.push(`TEXT 0,${footerY},"${font}",0,1,1,"${escapeTsplText(footerLine)}"`)
+      const footerWidth = footerLine.length * (hasChinese ? 24 : 12)
+      const footerX = Math.max(0, maxWidth - footerWidth - 4)
+      commands.push(`TEXT ${footerX},${footerY},"${font}",0,1,1,"${escapeTsplText(footerLine)}"`)
     }
     commands.push('PRINT 1,1')
   }
