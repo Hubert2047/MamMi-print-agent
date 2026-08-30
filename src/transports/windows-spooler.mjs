@@ -2,22 +2,32 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { config } from '../config.mjs'
 import { renderLabel } from '../renderers/label-renderer.mjs'
+import { renderReceipt } from '../renderers/receipt-renderer.mjs'
 import iconv from 'iconv-lite'
 
 const execFileAsync = promisify(execFile)
 
 export async function printText(text, printer) {
+  const profile = printer.profile || printer.printerProfile
   // Kitchen label printers understand TSPL directly. Avoid the bitmap renderer
   // (which starts PowerShell/System.Drawing and scans every pixel) because that
   // adds several seconds for multi-item Chinese orders.
   const tsplText = normalizeTsplText(text)
-  if ((printer.profile || printer.printerProfile) === 'kitchen-label-tspl' && canUseDirectTspl(tsplText)) {
+  if (profile === 'kitchen-label-tspl' && canUseDirectTspl(tsplText)) {
     await printDirectTspl(tsplText, printer)
     return
   }
 
+  if (profile === 'receipt-escpos') {
+    await renderReceipt(text, printer)
+    if (printer.cutEnabled) {
+      if (!printer.cutFeedHex || !printer.cutCommandHex) throw new Error('Receipt cutter is enabled but its commands are not configured')
+      await sendRawPrinterBytes(`${printer.cutFeedHex}${printer.cutCommandHex}`, printer)
+    }
+    return
+  }
+
   await renderLabel(text, printer)
-  if (config.cutEnabled) await sendRawPrinterBytes(`${config.cutFeedHex}${config.cutCommandHex}`, printer)
 }
 
 function canUseDirectTspl(text) {

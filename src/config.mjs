@@ -33,9 +33,6 @@ export const config = Object.freeze({
   backendUrl: required('BACKEND_URL').replace(/\/$/, ''),
   agentId: required('AGENT_ID'),
   agentToken: required('AGENT_TOKEN'),
-  cutEnabled: /^(1|true|yes)$/i.test(process.env.CUT_ENABLED || 'false'),
-  cutCommandHex: process.env.CUT_COMMAND_HEX || '1D5600',
-  cutFeedHex: process.env.CUT_FEED_HEX || '1B6403',
   longPollWaitMs: Number(process.env.LONG_POLL_WAIT_MS || 25000),
   requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS || 30000),
 })
