@@ -7,14 +7,14 @@ import iconv from 'iconv-lite'
 
 const execFileAsync = promisify(execFile)
 
-export async function printText(text, printer) {
+export async function printText(text, printer, options = {}) {
   const profile = printer.profile || printer.printerProfile
   // Kitchen label printers understand TSPL directly. Avoid the bitmap renderer
   // (which starts PowerShell/System.Drawing and scans every pixel) because that
   // adds several seconds for multi-item Chinese orders.
   const tsplText = normalizeTsplText(text)
-  if (profile === 'kitchen-label-tspl' && canUseDirectTspl(tsplText)) {
-    await printDirectTspl(tsplText, printer)
+  if (profile === 'kitchen-label-tspl' && options.kind !== 'test' && canUseDirectTspl(tsplText)) {
+    await printDirectTspl(tsplText, printer, options)
     return
   }
 
@@ -27,7 +27,7 @@ export async function printText(text, printer) {
     return
   }
 
-  await renderLabel(text, printer)
+  await renderLabel(text, printer, options)
 }
 
 function canUseDirectTspl(text) {
@@ -45,12 +45,14 @@ function escapeTsplText(value) {
   return value.replace(/"/g, "'")
 }
 
-async function printDirectTspl(text, printer) {
+async function printDirectTspl(text, printer, options = {}) {
   const widthDots = Math.max(1, Math.round(Number(printer.labelWidthMm) * Number(printer.printerDpi) / 25.4))
   const hasChinese = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(text)
   // TST24.BF2 is the installed Chinese font on the configured printer.
   // Smaller TST16.BF2 is not supported by this printer and produces blank labels.
   const font = hasChinese ? 'TST24.BF2' : '0'
+  const requestedSize = Number(options.fontSize) || 18
+  const textScale = Math.min(3, Math.max(1, Math.ceil(requestedSize / 18)))
   // Use the full configured label width; the previous 8-dot margins caused
   // otherwise-fitting headers to wrap on narrow 58 mm labels.
   const maxWidth = Math.max(1, widthDots)
@@ -71,7 +73,7 @@ async function printDirectTspl(text, printer) {
       let line = ''
       let lineWidth = 0
       for (const character of sourceLine) {
-        const characterWidth = hasChinese && /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(character) ? 24 : 12
+      const characterWidth = (hasChinese && /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(character) ? 24 : 12) * textScale
         if (line && lineWidth + characterWidth > maxWidth) {
           lines.push(line)
           line = ''
@@ -85,16 +87,18 @@ async function printDirectTspl(text, printer) {
       }
     }
     commands.push('CLS')
+    const lineSpacing = (hasChinese ? 28 : 24) * textScale
+    const startY = 8
     lines.forEach((line, index) => {
       // TST24.BF2 is 24 dots high; keep at least 28 dots between baselines
       // or the next line overlaps the previous one on Xprinter hardware.
-      commands.push(`TEXT 0,${8 + (index * (hasChinese ? 28 : 24))},"${font}",0,1,1,"${escapeTsplText(line)}"`)
+      const lineX = 0
+      commands.push(`TEXT ${lineX},${startY + (index * lineSpacing)},"${font}",0,${textScale},${textScale},"${escapeTsplText(line)}"`)
     })
     if (footerLine) {
-      const footerY = Math.max(8, Math.round(Number(printer.labelHeightMm) * Number(printer.printerDpi) / 25.4) - (hasChinese ? 26 : 22))
-      const footerWidth = footerLine.length * (hasChinese ? 24 : 12)
-      const footerX = Math.max(0, maxWidth - footerWidth - 4)
-      commands.push(`TEXT ${footerX},${footerY},"${font}",0,1,1,"${escapeTsplText(footerLine)}"`)
+      const footerY = Math.max(8, Math.round(Number(printer.labelHeightMm) * Number(printer.printerDpi) / 25.4) - ((hasChinese ? 28 : 24) * textScale))
+      const footerX = 0
+      commands.push(`TEXT ${footerX},${footerY},"${font}",0,${textScale},${textScale},"${escapeTsplText(footerLine)}"`)
     }
     commands.push('PRINT 1,1')
   }

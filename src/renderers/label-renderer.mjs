@@ -7,12 +7,12 @@ import { config } from '../config.mjs'
 
 const execFileAsync = promisify(execFile)
 
-export async function renderLabel(text, printer = config) {
+export async function renderLabel(text, printer = config, options = {}) {
   const filePath = path.join(os.tmpdir(), `mammi-print-${Date.now()}-${process.pid}.txt`)
   await fs.writeFile(filePath, `${text.trim()}\r\n\r\n`, 'utf8')
   const script = `
 Add-Type -AssemblyName System.Drawing
-$lineHeight = 23
+  $lineHeight = [int]([Math]::Max(24, [double]$env:MAMMI_TEST_LINE_HEIGHT))
 $labelWidthPx = [int][Math]::Ceiling([double]$env:MAMMI_LABEL_WIDTH_MM * [double]$env:MAMMI_PRINTER_DPI / 25.4)
 $labelHeightPx = [int][Math]::Ceiling([double]$env:MAMMI_LABEL_HEIGHT_MM * [double]$env:MAMMI_PRINTER_DPI / 25.4)
 function New-LabelBitmap([string]$block) {
@@ -24,9 +24,11 @@ function New-LabelBitmap([string]$block) {
   for ($index = 0; $index -lt $lines.Count; $index++) {
     $raw = $lines[$index].TrimEnd("\`r")
     $isOptionLine = $raw.StartsWith('- ') -or $raw.StartsWith('+ ') -or $raw.StartsWith('不加:') -or $raw.StartsWith('加點:')
-    $fontSize = if ($index -eq 1) { 16 } elseif ($index -eq 0) { 12 } elseif ($isOptionLine) { 12 } else { 10 }
+    $baseSize = [double]$env:MAMMI_TEST_FONT_SIZE
+    $fontSize = if ($index -eq 1) { $baseSize } elseif ($index -eq 0) { [Math]::Max(12, $baseSize - 5) } elseif ($isOptionLine) { [Math]::Max(12, $baseSize - 5) } else { [Math]::Max(10, $baseSize - 7) }
     $originalWasEmpty = $raw.Length -eq 0
-    $measureFont = [System.Drawing.Font]::new('Arial', [single]$fontSize, [System.Drawing.FontStyle]::Bold)
+    $measureStyle = if ($env:MAMMI_TEST_BOLD -eq '1') { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
+    $measureFont = [System.Drawing.Font]::new('Segoe UI', [single]$fontSize, $measureStyle)
     while ($raw.Length -gt 0) {
       $cut = $raw.Length
       while ($cut -gt 1 -and $measureGraphics.MeasureString($raw.Substring(0, $cut), $measureFont).Width -gt $maxTextWidth) { $cut-- }
@@ -53,28 +55,33 @@ function New-LabelBitmap([string]$block) {
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphics.Clear([System.Drawing.Color]::White)
   $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-  $graphics.SetClip([System.Drawing.Rectangle]::new(7, 0, $labelWidthPx - 20, [int]$height))
-  $y = 6
+  $graphics.SetClip([System.Drawing.Rectangle]::new(0, 0, $labelWidthPx, [int]$height))
+  $fontHeight = [double]$env:MAMMI_TEST_FONT_SIZE
+  $contentHeight = if ($renderLines.Count -gt 0) { (($renderLines.Count - 1) * $lineHeight) + $fontHeight } else { 0 }
+  $centerContent = $env:MAMMI_PRINT_CENTER_CONTENT -eq '1'
+  $y = if ($centerContent) { [Math]::Max(6, [int](($height - $contentHeight) / 2)) } else { 6 }
   $footerY = [int]$height - 36
   for ($lineIndex = 0; $lineIndex -lt $renderLines.Count; $lineIndex++) {
     $line = $renderLines[$lineIndex]
-    $style = if ($line.Size -ge 11) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
-    $font = [System.Drawing.Font]::new('Arial', [single]$line.Size, $style)
+    $style = if ($env:MAMMI_TEST_BOLD -eq '1') { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
+    $font = [System.Drawing.Font]::new('Segoe UI', [single]$line.Size, $style)
     $isFooter = $line.Text.Trim() -match '^[0-9]+/[0-9]+$'
     $isNoteLine = $line.Text.Trim().StartsWith('不加:')
     if ($isFooter) { $font.Dispose(); continue }
     $drawY = if ($isNoteLine) { $y + 6 } else { $y }
     if ($null -ne $footerLine -and $drawY -ge $footerY) { $font.Dispose(); break }
-    $graphics.DrawString($line.Text, $font, [System.Drawing.Brushes]::Black, 7, $drawY)
+    $lineWidth = $graphics.MeasureString($line.Text, $font).Width
+    $drawX = if ($centerContent) { [Math]::Max(0, [int](($labelWidthPx - $lineWidth) / 2)) } else { 0 }
+    $graphics.DrawString($line.Text, $font, [System.Drawing.Brushes]::Black, $drawX, $drawY)
     $font.Dispose()
     $y = $drawY + $lineHeight
   }
   if ($null -ne $footerLine) {
     $graphics.FillRectangle([System.Drawing.Brushes]::White, 0, [Math]::Max(0, $footerY - 3), $labelWidthPx, [int]$height - [Math]::Max(0, $footerY - 3))
-    $footerFont = [System.Drawing.Font]::new('Arial', [single]18, [System.Drawing.FontStyle]::Bold)
+    $footerFont = [System.Drawing.Font]::new('Segoe UI', [single]22, [System.Drawing.FontStyle]::Bold)
     $footerText = $footerLine.Text.Trim()
     $footerWidth = $graphics.MeasureString($footerText, $footerFont).Width
-    $footerX = [Math]::Max(7, $labelWidthPx - 7 - [int]$footerWidth)
+    $footerX = if ($centerContent) { [Math]::Max(0, [int](($labelWidthPx - $footerWidth) / 2)) } else { 0 }
     $graphics.DrawString($footerText, $footerFont, [System.Drawing.Brushes]::Black, $footerX, $footerY)
     $footerFont.Dispose()
   }
@@ -151,7 +158,7 @@ foreach ($bitmap in $bitmaps) { $bitmap.Dispose() }
     await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
       windowsHide: true,
       timeout: config.requestTimeoutMs,
-      env: { ...process.env, MAMMI_PRINT_FILE: filePath, MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName, MAMMI_PRINT_PROFILE: printer.profile || printer.printerProfile, MAMMI_PRINTER_DPI: String(printer.printerDpi), MAMMI_LABEL_WIDTH_MM: String(printer.labelWidthMm), MAMMI_LABEL_HEIGHT_MM: String(printer.labelHeightMm), MAMMI_LABEL_GAP_MM: String(printer.labelGapMm) },
+      env: { ...process.env, MAMMI_PRINT_FILE: filePath, MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName, MAMMI_PRINT_PROFILE: printer.profile || printer.printerProfile, MAMMI_PRINTER_DPI: String(printer.printerDpi), MAMMI_LABEL_WIDTH_MM: String(printer.labelWidthMm), MAMMI_LABEL_HEIGHT_MM: String(printer.labelHeightMm), MAMMI_LABEL_GAP_MM: String(printer.labelGapMm), MAMMI_TEST_FONT_SIZE: String(Math.min(48, Math.max(8, Number(options.fontSize) || 18))), MAMMI_TEST_BOLD: options.bold ? '1' : '0', MAMMI_TEST_LINE_HEIGHT: String(Math.min(60, Math.max(24, (Number(options.fontSize) || 18) + 10))), MAMMI_PRINT_CENTER_CONTENT: options.kind === 'test' ? '1' : '0' },
     })
   } finally {
     await fs.rm(filePath, { force: true })
