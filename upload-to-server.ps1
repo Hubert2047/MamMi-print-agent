@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 # ===== SSH CONFIGURATION =====
 $sshUser = 'hp'
-$sshHost = '100.67.213.27'
+$sshHost = '100.78.69.25'
 $remoteDirectory = 'C:/Users/HP/app/print-agent'
 
 # Optional: set the path to your private key, or leave empty to use the default SSH key.
