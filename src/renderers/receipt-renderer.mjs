@@ -1,17 +1,20 @@
-import { execFile } from 'node:child_process'
-import fs from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
-import { promisify } from 'node:util'
-import { config } from '../config.mjs'
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { config } from "../config.mjs";
 
-const execFileAsync = promisify(execFile)
+const execFileAsync = promisify(execFile);
 
 // Receipt printers use their Windows driver (GDI), not TSPL RAW commands. This
 // preserves Unicode text and lets the configured paper roll/cutter behave normally.
 export async function renderReceipt(text, printer) {
-  const filePath = path.join(os.tmpdir(), `mammi-receipt-${Date.now()}-${process.pid}.txt`)
-  await fs.writeFile(filePath, `${text.trim()}\r\n`, 'utf8')
+  const filePath = path.join(
+    os.tmpdir(),
+    `mammi-receipt-${Date.now()}-${process.pid}.txt`,
+  );
+  await fs.writeFile(filePath, `${text.trim()}\r\n`, "utf8");
   const script = `
 Add-Type -AssemblyName System.Drawing
 $text = Get-Content -LiteralPath $env:MAMMI_PRINT_FILE -Raw -Encoding UTF8
@@ -39,20 +42,31 @@ $document.add_PrintPage([System.Drawing.Printing.PrintPageEventHandler]{
   $eventArgs.HasMorePages = $false
 })
 try { $document.Print() } finally { $font.Dispose(); $format.Dispose(); $document.Dispose() }
-`
+`;
   try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-      windowsHide: true,
-      timeout: config.requestTimeoutMs,
-      env: {
-        ...process.env,
-        MAMMI_PRINT_FILE: filePath,
-        MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName,
-        MAMMI_PRINTER_DPI: String(printer.printerDpi || 203),
-        MAMMI_RECEIPT_WIDTH_MM: String(printer.labelWidthMm || 80),
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+      ],
+      {
+        windowsHide: true,
+        timeout: config.requestTimeoutMs,
+        env: {
+          ...process.env,
+          MAMMI_PRINT_FILE: filePath,
+          MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName,
+          MAMMI_PRINTER_DPI: String(printer.printerDpi || 203),
+          MAMMI_RECEIPT_WIDTH_MM: String(printer.labelWidthMm || 80),
+        },
       },
-    })
+    );
   } finally {
-    await fs.rm(filePath, { force: true })
+    await fs.rm(filePath, { force: true });
   }
 }

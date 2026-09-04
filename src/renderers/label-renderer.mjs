@@ -1,15 +1,18 @@
-import { execFile } from 'node:child_process'
-import fs from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
-import { promisify } from 'node:util'
-import { config } from '../config.mjs'
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { config } from "../config.mjs";
 
-const execFileAsync = promisify(execFile)
+const execFileAsync = promisify(execFile);
 
 export async function renderLabel(text, printer = config, options = {}) {
-  const filePath = path.join(os.tmpdir(), `mammi-print-${Date.now()}-${process.pid}.txt`)
-  await fs.writeFile(filePath, `${text.trim()}\r\n\r\n`, 'utf8')
+  const filePath = path.join(
+    os.tmpdir(),
+    `mammi-print-${Date.now()}-${process.pid}.txt`,
+  );
+  await fs.writeFile(filePath, `${text.trim()}\r\n\r\n`, "utf8");
   const script = `
 Add-Type -AssemblyName System.Drawing
   $lineHeight = [int]([Math]::Max(24, [double]$env:MAMMI_TEST_LINE_HEIGHT))
@@ -153,14 +156,42 @@ try {
   } finally { [MamMiRawLabelPrinter]::EndDocPrinter($handle) }
 } finally { [MamMiRawLabelPrinter]::ClosePrinter($handle) }
 foreach ($bitmap in $bitmaps) { $bitmap.Dispose() }
-`
+`;
   try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-      windowsHide: true,
-      timeout: config.requestTimeoutMs,
-      env: { ...process.env, MAMMI_PRINT_FILE: filePath, MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName, MAMMI_PRINT_PROFILE: printer.profile || printer.printerProfile, MAMMI_PRINTER_DPI: String(printer.printerDpi), MAMMI_LABEL_WIDTH_MM: String(printer.labelWidthMm), MAMMI_LABEL_HEIGHT_MM: String(printer.labelHeightMm), MAMMI_LABEL_GAP_MM: String(printer.labelGapMm), MAMMI_TEST_FONT_SIZE: String(Math.min(48, Math.max(8, Number(options.fontSize) || 18))), MAMMI_TEST_BOLD: options.bold ? '1' : '0', MAMMI_TEST_LINE_HEIGHT: String(Math.min(60, Math.max(24, (Number(options.fontSize) || 18) + 10))), MAMMI_PRINT_CENTER_CONTENT: options.kind === 'test' ? '1' : '0' },
-    })
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+      ],
+      {
+        windowsHide: true,
+        timeout: config.requestTimeoutMs,
+        env: {
+          ...process.env,
+          MAMMI_PRINT_FILE: filePath,
+          MAMMI_PRINTER_NAME: printer.windowsPrinterName || printer.printerName,
+          MAMMI_PRINT_PROFILE: printer.profile || printer.printerProfile,
+          MAMMI_PRINTER_DPI: String(printer.printerDpi),
+          MAMMI_LABEL_WIDTH_MM: String(printer.labelWidthMm),
+          MAMMI_LABEL_HEIGHT_MM: String(printer.labelHeightMm),
+          MAMMI_LABEL_GAP_MM: String(printer.labelGapMm),
+          MAMMI_TEST_FONT_SIZE: String(
+            Math.min(48, Math.max(8, Number(options.fontSize) || 18)),
+          ),
+          MAMMI_TEST_BOLD: options.bold ? "1" : "0",
+          MAMMI_TEST_LINE_HEIGHT: String(
+            Math.min(60, Math.max(24, (Number(options.fontSize) || 18) + 10)),
+          ),
+          MAMMI_PRINT_CENTER_CONTENT: options.kind === "test" ? "1" : "0",
+        },
+      },
+    );
   } finally {
-    await fs.rm(filePath, { force: true })
+    await fs.rm(filePath, { force: true });
   }
 }
